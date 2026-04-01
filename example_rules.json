@@ -1,0 +1,117 @@
+{
+  "_comment": "Example NetGuard firewall rules. POST each to /api/rules",
+  "rules": [
+    {
+      "name": "Block Known Malicious IP Range",
+      "action": "BLOCK",
+      "src_ip": "185.220.101.0/24",
+      "direction": "inbound",
+      "protocol": null,
+      "priority": 100,
+      "description": "Known Tor exit node range"
+    },
+    {
+      "name": "Block Telnet (Plaintext Protocol)",
+      "action": "BLOCK",
+      "dst_port": 23,
+      "protocol": "TCP",
+      "direction": "both",
+      "priority": 95,
+      "description": "Telnet transmits credentials in plaintext. Use SSH instead."
+    },
+    {
+      "name": "Block FTP Control Channel",
+      "action": "BLOCK",
+      "dst_port": 21,
+      "protocol": "TCP",
+      "direction": "both",
+      "priority": 95,
+      "description": "FTP is insecure. Use SFTP/SCP instead."
+    },
+    {
+      "name": "Block External RDP",
+      "action": "BLOCK",
+      "dst_port": 3389,
+      "protocol": "TCP",
+      "direction": "inbound",
+      "priority": 90,
+      "description": "Block Remote Desktop from external networks"
+    },
+    {
+      "name": "Block SMB from External",
+      "action": "BLOCK",
+      "dst_port": 445,
+      "protocol": "TCP",
+      "direction": "inbound",
+      "priority": 90,
+      "description": "Prevent SMB exploits from internet"
+    },
+    {
+      "name": "Block SMTP Relay",
+      "action": "BLOCK",
+      "dst_port": 25,
+      "protocol": "TCP",
+      "direction": "outbound",
+      "priority": 85,
+      "description": "Prevent outbound spam / mail relay"
+    },
+    {
+      "name": "Block NetBIOS",
+      "action": "BLOCK",
+      "dst_port": 137,
+      "protocol": "UDP",
+      "direction": "inbound",
+      "priority": 80,
+      "description": "Block NetBIOS name service from external"
+    },
+    {
+      "name": "Allow DNS Resolution",
+      "action": "ALLOW",
+      "dst_port": 53,
+      "protocol": "UDP",
+      "direction": "outbound",
+      "priority": 10,
+      "description": "Allow outbound DNS queries"
+    },
+    {
+      "name": "Allow HTTPS",
+      "action": "ALLOW",
+      "dst_port": 443,
+      "protocol": "TCP",
+      "direction": "outbound",
+      "priority": 10,
+      "description": "Allow encrypted web browsing"
+    },
+    {
+      "name": "Allow SSH from LAN",
+      "action": "ALLOW",
+      "src_ip": "192.168.0.0/16",
+      "dst_port": 22,
+      "protocol": "TCP",
+      "direction": "inbound",
+      "priority": 50,
+      "description": "Allow SSH from local network only"
+    },
+    {
+      "name": "Rate Limit ICMP",
+      "action": "ALLOW",
+      "protocol": "ICMP",
+      "direction": "inbound",
+      "priority": 5,
+      "description": "Allow ICMP (ping) - monitor for flood patterns"
+    }
+  ],
+
+  "example_filter_expressions": {
+    "show_blocked_only": "verdict == BLOCK",
+    "show_specific_ip": "ip.src == 192.168.1.100",
+    "show_http_and_https": "http or https",
+    "show_large_packets": "size > 1400",
+    "show_port_scan": "tcp and size < 100",
+    "show_dns_queries": "dns",
+    "show_to_specific_subnet": "ip.dst contains 10.0.0",
+    "exclude_internal": "ip.src contains 192.168",
+    "show_suspicious_ports": "dst_port == 4444 or dst_port == 31337",
+    "show_all_ssh": "ssh or tcp.port == 22"
+  }
+}

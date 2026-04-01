@@ -1,0 +1,1439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NetGuard — Packet Analyzer & Firewall</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<style>
+/* ═══════════════════════════════════════════════════════════
+   NETGUARD — Industrial Terminal Aesthetic
+   Dark phosphor-green on obsidian. Brutalist grid. CRT soul.
+═══════════════════════════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Share+Tech+Mono&display=swap');
+
+:root {
+  --bg:         #080c0a;
+  --bg2:        #0c1210;
+  --bg3:        #111a16;
+  --border:     #1a2e24;
+  --green:      #00ff88;
+  --green-dim:  #00cc66;
+  --green-pale: #004422;
+  --red:        #ff3355;
+  --red-dim:    #cc2244;
+  --amber:      #ffaa00;
+  --blue:       #00aaff;
+  --cyan:       #00ffdd;
+  --text:       #c8e8d8;
+  --text-dim:   #5a8a6a;
+  --text-faint: #2a4a34;
+  --font-mono:  'JetBrains Mono', 'Share Tech Mono', monospace;
+  --glow:       0 0 8px rgba(0,255,136,0.3);
+  --glow-red:   0 0 8px rgba(255,51,85,0.4);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+}
+
+/* ── Scanline overlay ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.15) 2px,
+    rgba(0,0,0,0.15) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── Layout ── */
+#app {
+  display: grid;
+  grid-template-rows: 48px 1fr;
+  grid-template-columns: 1fr;
+  height: 100vh;
+  gap: 0;
+}
+
+/* ════════════════════════════
+   HEADER
+════════════════════════════ */
+#header {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  position: relative;
+}
+
+#logo {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--green);
+  text-shadow: var(--glow);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+#logo span { color: var(--text-dim); font-weight: 300; }
+
+.hdr-sep { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
+
+/* Interface selector */
+#iface-group { display: flex; align-items: center; gap: 8px; }
+#iface-label { color: var(--text-dim); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+select#iface-select {
+  background: var(--bg3); border: 1px solid var(--border);
+  color: var(--green); font-family: var(--font-mono); font-size: 11px;
+  padding: 3px 8px; outline: none; cursor: pointer; appearance: none;
+  border-radius: 0;
+}
+select#iface-select:focus { border-color: var(--green); }
+
+/* Capture controls */
+#ctrl-group { display: flex; gap: 6px; }
+
+.btn {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1.5px;
+  padding: 5px 14px; border: 1px solid; cursor: pointer;
+  transition: all 0.15s; background: transparent;
+  border-radius: 0;
+}
+.btn-green { border-color: var(--green); color: var(--green); }
+.btn-green:hover { background: var(--green); color: var(--bg); box-shadow: var(--glow); }
+.btn-green:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn-red { border-color: var(--red); color: var(--red); }
+.btn-red:hover { background: var(--red); color: var(--bg); box-shadow: var(--glow-red); }
+.btn-red:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn-amber { border-color: var(--amber); color: var(--amber); }
+.btn-amber:hover { background: var(--amber); color: var(--bg); }
+
+/* Status indicators */
+#status-bar { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+
+.status-indicator {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: var(--text-dim);
+}
+.status-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--text-faint);
+  transition: background 0.3s;
+}
+.status-dot.active {
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: pulse 2s infinite;
+}
+.status-dot.error { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
+}
+
+.stat-chip {
+  font-size: 10px; padding: 2px 8px;
+  border: 1px solid var(--border); color: var(--text-dim);
+}
+.stat-chip b { color: var(--green); }
+
+/* ════════════════════════════
+   MAIN BODY — 3-column layout
+════════════════════════════ */
+#main {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  grid-template-rows: 1fr;
+  overflow: hidden;
+  gap: 0;
+}
+
+/* ════════════════════════════
+   LEFT PANEL — Packet list + filter
+════════════════════════════ */
+#left-panel {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+/* Filter bar */
+#filter-bar {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+#filter-label {
+  color: var(--amber);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  flex-shrink: 0;
+}
+
+#filter-input {
+  flex: 1;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--cyan);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  outline: none;
+  border-radius: 0;
+}
+#filter-input:focus { border-color: var(--amber); }
+#filter-input.error { border-color: var(--red); color: var(--red); }
+#filter-input.ok { border-color: var(--green); }
+
+#filter-status {
+  font-size: 10px; min-width: 60px;
+  color: var(--text-dim); text-align: right; flex-shrink: 0;
+}
+
+/* Tab bar */
+#tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+.tab {
+  padding: 6px 16px; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--text-dim); cursor: pointer;
+  border-bottom: 2px solid transparent; transition: all 0.15s;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--green); border-bottom-color: var(--green); }
+
+/* Packet table */
+#packet-area {
+  overflow-y: auto; overflow-x: hidden;
+  position: relative;
+}
+
+#packet-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#packet-table thead {
+  position: sticky; top: 0; z-index: 10;
+  background: var(--bg2);
+}
+
+#packet-table th {
+  padding: 6px 8px;
+  text-align: left;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  user-select: none;
+}
+
+#packet-table td {
+  padding: 3px 8px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+  cursor: pointer;
+}
+
+#packet-table tbody tr:hover { background: var(--bg3); }
+#packet-table tbody tr.selected { background: var(--green-pale) !important; }
+#packet-table tbody tr.blocked { background: rgba(255,51,85,0.07); }
+#packet-table tbody tr.blocked td { color: var(--red-dim); }
+
+/* Status bar bottom */
+#bottom-bar {
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  padding: 4px 12px;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+#bottom-bar b { color: var(--green); }
+
+/* ════════════════════════════
+   RIGHT PANEL — Tabbed sidebar
+════════════════════════════ */
+#right-panel {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+  background: var(--bg2);
+}
+
+#right-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.rtab {
+  flex: 1; text-align: center;
+  padding: 7px 4px;
+  font-size: 9px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--text-dim); cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.rtab:hover { color: var(--text); }
+.rtab.active { color: var(--green); border-bottom-color: var(--green); }
+
+#right-content { overflow-y: auto; padding: 12px; }
+
+/* ── Packet Detail ── */
+.detail-section { margin-bottom: 12px; }
+.detail-section-title {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 2px;
+  color: var(--amber); border-bottom: 1px solid var(--border);
+  padding-bottom: 4px; margin-bottom: 8px;
+}
+.detail-row {
+  display: flex; justify-content: space-between; margin-bottom: 4px;
+  font-size: 11px;
+}
+.detail-label { color: var(--text-dim); flex-shrink: 0; margin-right: 8px; }
+.detail-value { color: var(--text); text-align: right; word-break: break-all; }
+.detail-value.green { color: var(--green); }
+.detail-value.red { color: var(--red); }
+.detail-value.amber { color: var(--amber); }
+.detail-value.cyan { color: var(--cyan); }
+
+.no-selection {
+  text-align: center; color: var(--text-faint);
+  padding: 40px 16px; font-size: 11px;
+  line-height: 1.8;
+}
+
+/* ── Firewall Rules ── */
+.fw-add-btn {
+  width: 100%; margin-bottom: 12px;
+  padding: 7px; font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1px; border: 1px dashed var(--green-pale);
+  background: transparent; color: var(--green-dim); cursor: pointer;
+  transition: all 0.15s;
+}
+.fw-add-btn:hover { border-color: var(--green); color: var(--green); background: var(--green-pale); }
+
+.rule-card {
+  border: 1px solid var(--border);
+  margin-bottom: 8px;
+  transition: border-color 0.15s;
+}
+.rule-card:hover { border-color: var(--green-pale); }
+.rule-card.disabled { opacity: 0.45; }
+
+.rule-header {
+  display: flex; align-items: center;
+  padding: 6px 8px;
+  background: var(--bg3);
+  gap: 6px;
+  cursor: pointer;
+}
+.rule-badge {
+  font-size: 9px; font-weight: 700; padding: 1px 6px;
+  letter-spacing: 1px; text-transform: uppercase; flex-shrink: 0;
+}
+.badge-deny { background: var(--red); color: var(--bg); }
+.badge-allow { background: var(--green); color: var(--bg); }
+
+.rule-name { flex: 1; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rule-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+.icon-btn {
+  background: transparent; border: none; cursor: pointer;
+  font-size: 13px; padding: 2px 4px; line-height: 1;
+  color: var(--text-dim); transition: color 0.15s;
+}
+.icon-btn:hover { color: var(--text); }
+.icon-btn.del:hover { color: var(--red); }
+
+.rule-body {
+  padding: 6px 8px;
+  font-size: 10px;
+  color: var(--text-dim);
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.rule-tag {
+  background: var(--bg); border: 1px solid var(--border);
+  padding: 1px 6px; font-size: 9px; color: var(--cyan);
+}
+
+/* ── Quick block ── */
+.quick-block {
+  border: 1px solid var(--border);
+  padding: 10px;
+  margin-bottom: 12px;
+}
+.quick-block-title {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 2px;
+  color: var(--text-dim); margin-bottom: 8px;
+}
+.qb-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.qb-input {
+  flex: 1; background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); font-family: var(--font-mono); font-size: 11px;
+  padding: 4px 8px; outline: none;
+}
+.qb-input:focus { border-color: var(--red); }
+.qb-btn {
+  background: transparent; border: 1px solid var(--red);
+  color: var(--red); font-family: var(--font-mono); font-size: 9px;
+  padding: 4px 10px; cursor: pointer; text-transform: uppercase;
+  letter-spacing: 1px; font-weight: 700;
+}
+.qb-btn:hover { background: var(--red); color: var(--bg); }
+
+/* ── Stats panel ── */
+.stat-section { margin-bottom: 16px; }
+.stat-section-title {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 2px;
+  color: var(--amber); border-bottom: 1px solid var(--border);
+  padding-bottom: 4px; margin-bottom: 8px;
+}
+
+.big-number {
+  font-size: 28px; font-weight: 700; color: var(--green);
+  text-shadow: var(--glow); line-height: 1;
+}
+.big-label { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
+
+.stats-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  margin-bottom: 12px;
+}
+.stat-box {
+  background: var(--bg3); border: 1px solid var(--border);
+  padding: 8px 10px;
+}
+.stat-box .num { font-size: 18px; font-weight: 700; color: var(--green); }
+.stat-box .lbl { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
+.stat-box.red .num { color: var(--red); }
+.stat-box.amber .num { color: var(--amber); }
+
+/* Protocol bars */
+.proto-bar-row { margin-bottom: 6px; }
+.proto-bar-label {
+  display: flex; justify-content: space-between;
+  font-size: 10px; margin-bottom: 2px;
+}
+.proto-bar-track {
+  height: 4px; background: var(--bg3); position: relative;
+}
+.proto-bar-fill {
+  height: 100%; background: var(--green);
+  transition: width 0.5s ease;
+}
+.proto-bar-fill.red { background: var(--red); }
+.proto-bar-fill.amber { background: var(--amber); }
+.proto-bar-fill.blue { background: var(--blue); }
+.proto-bar-fill.cyan { background: var(--cyan); }
+
+/* Bandwidth sparkline */
+#bw-canvas {
+  width: 100%; height: 60px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  display: block;
+}
+
+/* Top IPs table */
+.top-table { width: 100%; border-collapse: collapse; }
+.top-table td {
+  font-size: 10px; padding: 3px 4px;
+  border-bottom: 1px solid var(--text-faint);
+}
+.top-table td:last-child { text-align: right; color: var(--green); }
+.top-table td:first-child { color: var(--text-dim); font-size: 9px; }
+
+/* ── Blocked Log ── */
+.log-entry {
+  font-size: 10px; padding: 5px 8px;
+  border-bottom: 1px solid var(--text-faint);
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+}
+.log-entry:hover { background: var(--bg3); }
+.log-time { color: var(--text-faint); }
+.log-detail { color: var(--red-dim); word-break: break-all; }
+
+/* ── Modal ── */
+#modal-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.85);
+  z-index: 1000;
+  align-items: center; justify-content: center;
+}
+#modal-overlay.open { display: flex; }
+
+#modal {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  width: 480px; max-width: 95vw;
+  padding: 24px;
+  box-shadow: 0 0 40px rgba(0,255,136,0.1);
+}
+#modal-title {
+  font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 2px;
+  color: var(--green); margin-bottom: 16px;
+  border-bottom: 1px solid var(--border); padding-bottom: 8px;
+}
+.form-row { margin-bottom: 12px; }
+.form-label {
+  display: block; font-size: 9px; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--text-dim); margin-bottom: 4px;
+}
+.form-input, .form-select {
+  width: 100%; background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text); font-family: var(--font-mono);
+  font-size: 11px; padding: 5px 8px; outline: none;
+}
+.form-input:focus, .form-select:focus { border-color: var(--green); }
+.form-row-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.modal-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+/* ── Scrollbars ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); }
+::-webkit-scrollbar-thumb:hover { background: var(--green-pale); }
+
+/* Protocol colors */
+.proto { font-size: 10px; font-weight: 700; padding: 1px 5px; }
+.p-TCP    { color: var(--green); }
+.p-UDP    { color: var(--amber); }
+.p-ICMP   { color: var(--blue); }
+.p-DNS    { color: var(--cyan); }
+.p-HTTP   { color: #ff8844; }
+.p-HTTPS  { color: #44ff88; }
+.p-SSH    { color: #ff44cc; }
+.p-ARP    { color: #ccaaff; }
+.p-UNKNOWN { color: var(--text-dim); }
+
+.blocked-badge {
+  font-size: 9px; font-weight: 700;
+  color: var(--red); letter-spacing: 1px;
+}
+.allowed-badge { display: none; }
+
+/* Toast */
+#toast {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: var(--bg3); border: 1px solid var(--green);
+  color: var(--green); padding: 8px 20px;
+  font-size: 11px; z-index: 2000;
+  opacity: 0; transition: opacity 0.3s;
+  pointer-events: none;
+}
+#toast.show { opacity: 1; }
+#toast.error { border-color: var(--red); color: var(--red); }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ══════════════════════════════
+       HEADER
+  ══════════════════════════════ -->
+  <header id="header">
+    <div id="logo">NET<span>GUARD</span></div>
+    <div class="hdr-sep"></div>
+
+    <div id="iface-group">
+      <span id="iface-label">Interface</span>
+      <select id="iface-select"><option value="any">any</option></select>
+    </div>
+
+    <div class="hdr-sep"></div>
+
+    <div id="ctrl-group">
+      <button class="btn btn-green" id="btn-start" onclick="startCapture()">▶ Start</button>
+      <button class="btn btn-red" id="btn-stop" disabled onclick="stopCapture()">■ Stop</button>
+      <button class="btn btn-amber" id="btn-export" onclick="exportCapture()">↓ Export PCAP</button>
+    </div>
+
+    <div id="status-bar">
+      <div class="status-indicator">
+        <div class="status-dot" id="capture-dot"></div>
+        <span id="capture-label">IDLE</span>
+      </div>
+      <div class="stat-chip">Packets: <b id="hdr-pkt-count">0</b></div>
+      <div class="stat-chip">Blocked: <b id="hdr-blocked" style="color:var(--red)">0</b></div>
+      <div class="stat-chip">Rate: <b id="hdr-rate">0</b> kbps</div>
+      <div class="status-indicator">
+        <div class="status-dot" id="ws-dot"></div>
+        <span id="ws-label">WS</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ══════════════════════════════
+       MAIN
+  ══════════════════════════════ -->
+  <div id="main">
+
+    <!-- LEFT: Filter + Packet list -->
+    <div id="left-panel">
+
+      <!-- Filter bar -->
+      <div id="filter-bar">
+        <span id="filter-label">Filter</span>
+        <input id="filter-input" type="text"
+          placeholder="ip.src == 192.168.1.1  |  protocol == TCP  |  port == 443  |  size > 500"
+          oninput="debounceFilter(this.value)"
+          onkeydown="if(event.key==='Escape')clearFilter()"
+        />
+        <span id="filter-status">0 shown</span>
+        <button class="btn btn-red" style="padding:4px 10px;font-size:9px" onclick="clearFilter()">✕ Clear</button>
+      </div>
+
+      <!-- Packet table -->
+      <div id="packet-area">
+        <table id="packet-table">
+          <thead>
+            <tr>
+              <th style="width:40px">#</th>
+              <th style="width:80px">Time</th>
+              <th style="width:130px">Source</th>
+              <th style="width:130px">Destination</th>
+              <th style="width:70px">Proto</th>
+              <th style="width:65px">Src Port</th>
+              <th style="width:65px">Dst Port</th>
+              <th style="width:60px">Size</th>
+              <th style="width:50px">FW</th>
+              <th>Info</th>
+            </tr>
+          </thead>
+          <tbody id="packet-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- Bottom bar -->
+      <div id="bottom-bar">
+        <span>Displayed: <b id="disp-count">0</b></span>
+        <span>Total captured: <b id="total-count">0</b></span>
+        <span>Blocked: <b id="blocked-count" style="color:var(--red)">0</b></span>
+        <span id="auto-scroll-status" style="margin-left:auto">
+          <label style="cursor:pointer;color:var(--text-dim)">
+            <input type="checkbox" id="auto-scroll" checked> Auto-scroll
+          </label>
+        </span>
+        <span>Buffer: <b id="buffer-count">0</b>/500</span>
+      </div>
+    </div>
+
+    <!-- RIGHT: Detail / Rules / Stats -->
+    <div id="right-panel">
+      <div id="right-tabs">
+        <div class="rtab active" onclick="switchRTab('detail',this)">Detail</div>
+        <div class="rtab" onclick="switchRTab('firewall',this)">Firewall</div>
+        <div class="rtab" onclick="switchRTab('stats',this)">Stats</div>
+        <div class="rtab" onclick="switchRTab('blocked-log',this)">Log</div>
+      </div>
+
+      <div id="right-content">
+
+        <!-- DETAIL TAB -->
+        <div id="tab-detail">
+          <div class="no-selection" id="no-selection">
+            ◈ Click a packet<br>to view details
+          </div>
+          <div id="packet-detail" style="display:none"></div>
+        </div>
+
+        <!-- FIREWALL TAB -->
+        <div id="tab-firewall" style="display:none">
+          <div class="quick-block">
+            <div class="quick-block-title">⚡ Quick Block</div>
+            <div class="qb-row">
+              <input class="qb-input" id="qb-ip" placeholder="IP Address or CIDR"/>
+              <button class="qb-btn" onclick="quickBlockIP()">Block IP</button>
+            </div>
+            <div class="qb-row">
+              <input class="qb-input" id="qb-port" type="number" min="1" max="65535" placeholder="Port number"/>
+              <button class="qb-btn" onclick="quickBlockPort()">Block Port</button>
+            </div>
+          </div>
+
+          <button class="fw-add-btn" onclick="openRuleModal()">+ Add Firewall Rule</button>
+          <div id="rules-list"></div>
+        </div>
+
+        <!-- STATS TAB -->
+        <div id="tab-stats" style="display:none">
+          <div class="stat-section">
+            <div class="stat-section-title">Overview</div>
+            <div class="stats-grid">
+              <div class="stat-box">
+                <div class="num" id="s-total">0</div>
+                <div class="lbl">Total Packets</div>
+              </div>
+              <div class="stat-box red">
+                <div class="num" id="s-blocked">0</div>
+                <div class="lbl">Blocked</div>
+              </div>
+              <div class="stat-box amber">
+                <div class="num" id="s-kbps">0</div>
+                <div class="lbl">Avg kbps</div>
+              </div>
+              <div class="stat-box">
+                <div class="num" id="s-mb">0</div>
+                <div class="lbl">Total MB</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="stat-section">
+            <div class="stat-section-title">Bandwidth (60s)</div>
+            <canvas id="bw-canvas"></canvas>
+          </div>
+
+          <div class="stat-section">
+            <div class="stat-section-title">Protocol Distribution</div>
+            <div id="proto-bars"></div>
+          </div>
+
+          <div class="stat-section">
+            <div class="stat-section-title">Top Source IPs</div>
+            <table class="top-table" id="top-src-table"></table>
+          </div>
+
+          <div class="stat-section">
+            <div class="stat-section-title">Top Dest Ports</div>
+            <table class="top-table" id="top-port-table"></table>
+          </div>
+        </div>
+
+        <!-- BLOCKED LOG TAB -->
+        <div id="tab-blocked-log" style="display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <span style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim)">Blocked Packets</span>
+            <button class="btn btn-red" style="font-size:9px;padding:3px 10px" onclick="loadBlockedLog()">↻ Refresh</button>
+          </div>
+          <div id="blocked-log-list"></div>
+        </div>
+
+      </div><!-- /right-content -->
+    </div><!-- /right-panel -->
+
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- ══════════════════════════════
+     ADD RULE MODAL
+══════════════════════════════ -->
+<div id="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div id="modal">
+    <div id="modal-title">⊕ Add Firewall Rule</div>
+    <div class="form-row">
+      <label class="form-label">Rule Name</label>
+      <input class="form-input" id="r-name" placeholder="e.g. Block HTTP from external">
+    </div>
+    <div class="form-row form-row-2col">
+      <div>
+        <label class="form-label">Action</label>
+        <select class="form-select" id="r-action">
+          <option value="DENY">DENY (Block)</option>
+          <option value="ALLOW">ALLOW</option>
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Direction</label>
+        <select class="form-select" id="r-direction">
+          <option value="BOTH">Both</option>
+          <option value="INBOUND">Inbound</option>
+          <option value="OUTBOUND">Outbound</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row form-row-2col">
+      <div>
+        <label class="form-label">Protocol</label>
+        <select class="form-select" id="r-protocol">
+          <option value="ANY">ANY</option>
+          <option value="TCP">TCP</option>
+          <option value="UDP">UDP</option>
+          <option value="ICMP">ICMP</option>
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Priority (lower = first)</label>
+        <input class="form-input" id="r-priority" type="number" value="100" min="1" max="999">
+      </div>
+    </div>
+    <div class="form-row form-row-2col">
+      <div>
+        <label class="form-label">Source IP / CIDR</label>
+        <input class="form-input" id="r-src-ip" placeholder="e.g. 192.168.1.0/24">
+      </div>
+      <div>
+        <label class="form-label">Dest IP / CIDR</label>
+        <input class="form-input" id="r-dst-ip" placeholder="any">
+      </div>
+    </div>
+    <div class="form-row form-row-2col">
+      <div>
+        <label class="form-label">Source Port</label>
+        <input class="form-input" id="r-src-port" type="number" min="1" max="65535" placeholder="any">
+      </div>
+      <div>
+        <label class="form-label">Dest Port</label>
+        <input class="form-input" id="r-dst-port" type="number" min="1" max="65535" placeholder="any">
+      </div>
+    </div>
+    <div class="form-row">
+      <label class="form-label">Description (optional)</label>
+      <input class="form-input" id="r-desc" placeholder="What does this rule do?">
+    </div>
+    <div class="modal-buttons">
+      <button class="btn btn-red" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-green" onclick="submitRule()">Add Rule</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ═══════════════════════════════════════════════
+   NetGuard Frontend — Main Application Script
+═══════════════════════════════════════════════ */
+
+const API = ''; // same origin
+const MAX_DISPLAY = 500;   // max rows in live table
+
+// ── State ─────────────────────────────────────
+let packets = [];           // all displayed packets (capped at MAX_DISPLAY)
+let selectedId = null;
+let captureRunning = false;
+let filterExpression = '';
+let filterDebounce = null;
+let activeRTab = 'detail';
+let statsInterval = null;
+let bwHistory = [];
+
+// ── WebSocket ─────────────────────────────────
+const socket = io(location.origin, { transports: ['websocket', 'polling'] });
+
+socket.on('connect', () => {
+  setWsDot(true);
+  loadInterfaces();
+  loadRules();
+  loadStats();
+});
+
+socket.on('disconnect', () => setWsDot(false));
+
+socket.on('packet', (pkt) => {
+  addPacketRow(pkt);
+  updateHeaderCounts();
+});
+
+socket.on('stats', (stats) => {
+  if (activeRTab === 'stats') renderStats(stats);
+  // update header kbps
+  document.getElementById('hdr-rate').textContent = stats.avg_kbps;
+  document.getElementById('hdr-pkt-count').textContent = stats.packet_count;
+  document.getElementById('hdr-blocked').textContent = stats.blocked_count;
+});
+
+socket.on('status', (s) => {
+  setCaptureState(s.running);
+});
+
+// ── Interface loading ─────────────────────────
+async function loadInterfaces() {
+  try {
+    const r = await fetch(`${API}/api/interfaces`);
+    const data = await r.json();
+    const sel = document.getElementById('iface-select');
+    sel.innerHTML = '';
+    (data.interfaces || ['any']).forEach(iface => {
+      const opt = document.createElement('option');
+      opt.value = iface; opt.textContent = iface;
+      sel.appendChild(opt);
+    });
+  } catch(e) { /* ignore */ }
+}
+
+// ── Capture control ───────────────────────────
+async function startCapture() {
+  const iface = document.getElementById('iface-select').value;
+  try {
+    const r = await fetch(`${API}/api/capture/start`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ interface: iface })
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    setCaptureState(true);
+    toast(`Capturing on ${iface}`);
+    packets = [];
+    document.getElementById('packet-tbody').innerHTML = '';
+    updateCounts();
+    startStatsPolling();
+  } catch(e) { toast('Cannot connect to backend', true); }
+}
+
+async function stopCapture() {
+  await fetch(`${API}/api/capture/stop`, { method: 'POST' });
+  setCaptureState(false);
+  toast('Capture stopped');
+  stopStatsPolling();
+}
+
+async function exportCapture() {
+  const fn = `capture_${Date.now()}.pcap`;
+  try {
+    const r = await fetch(`${API}/api/capture/export`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ filename: fn })
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    toast(`Exported ${d.packets} packets → ${d.file}`);
+  } catch(e) { toast('Export failed', true); }
+}
+
+function setCaptureState(running) {
+  captureRunning = running;
+  document.getElementById('btn-start').disabled = running;
+  document.getElementById('btn-stop').disabled = !running;
+  const dot = document.getElementById('capture-dot');
+  const lbl = document.getElementById('capture-label');
+  if (running) {
+    dot.classList.add('active'); dot.classList.remove('error');
+    lbl.textContent = 'LIVE';
+  } else {
+    dot.classList.remove('active'); lbl.textContent = 'IDLE';
+  }
+}
+
+// ── Packet table ─────────────────────────────
+const protoColors = {
+  TCP:'green',UDP:'amber',ICMP:'blue',DNS:'cyan',
+  HTTP:'#ff8844',HTTPS:'#44ff88',SSH:'#ff44cc',
+  ARP:'#ccaaff',FTP:'#aa88ff',SMTP:'#ffcc44'
+};
+
+function addPacketRow(pkt) {
+  if (packets.length >= MAX_DISPLAY) {
+    packets.shift();
+    const tbody = document.getElementById('packet-tbody');
+    if (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+  }
+  packets.push(pkt);
+
+  const tbody = document.getElementById('packet-tbody');
+  const tr = document.createElement('tr');
+  tr.dataset.id = pkt.id;
+  if (pkt.blocked) tr.classList.add('blocked');
+  if (pkt.id === selectedId) tr.classList.add('selected');
+
+  const time = pkt.timestamp ? pkt.timestamp.split('T')[1].split('.')[0] : '';
+  const proto = pkt.protocol || 'UNK';
+  const color = protoColors[proto] || 'var(--text-dim)';
+
+  tr.innerHTML = `
+    <td style="color:var(--text-faint)">${pkt.id}</td>
+    <td style="color:var(--text-dim)">${time}</td>
+    <td>${pkt.src_ip || '—'}</td>
+    <td>${pkt.dst_ip || '—'}</td>
+    <td><span class="proto p-${proto}" style="color:${color}">${proto}</span></td>
+    <td style="color:var(--text-dim)">${pkt.src_port || '—'}</td>
+    <td style="color:var(--text-dim)">${pkt.dst_port || '—'}</td>
+    <td style="color:var(--text-dim)">${pkt.size}</td>
+    <td>${pkt.blocked ? '<span class="blocked-badge">DENY</span>' : ''}</td>
+    <td style="color:var(--text-faint);max-width:200px">${pkt.info || ''}</td>
+  `;
+  tr.onclick = () => selectPacket(pkt);
+  tbody.appendChild(tr);
+
+  // Auto-scroll
+  if (document.getElementById('auto-scroll').checked) {
+    const area = document.getElementById('packet-area');
+    area.scrollTop = area.scrollHeight;
+  }
+  updateCounts();
+}
+
+function selectPacket(pkt) {
+  selectedId = pkt.id;
+  // Highlight row
+  document.querySelectorAll('#packet-tbody tr').forEach(tr => {
+    tr.classList.toggle('selected', parseInt(tr.dataset.id) === pkt.id);
+  });
+  renderDetail(pkt);
+  // Switch to detail tab if not already
+  if (activeRTab !== 'detail') {
+    document.querySelector('.rtab').click();
+  }
+}
+
+function renderDetail(pkt) {
+  document.getElementById('no-selection').style.display = 'none';
+  const el = document.getElementById('packet-detail');
+  el.style.display = 'block';
+
+  const proto = pkt.protocol || 'UNKNOWN';
+  const color = protoColors[proto] || 'var(--text-dim)';
+
+  const rows = (obj) => Object.entries(obj)
+    .filter(([,v]) => v !== null && v !== undefined && v !== '')
+    .map(([k,v]) => `
+      <div class="detail-row">
+        <span class="detail-label">${k.replace(/_/g,' ')}</span>
+        <span class="detail-value">${v}</span>
+      </div>`).join('');
+
+  el.innerHTML = `
+    <div class="detail-section">
+      <div class="detail-section-title" style="color:${color}">◈ ${proto} Packet #${pkt.id}</div>
+      ${rows({
+        Timestamp: pkt.timestamp,
+        'Source IP': pkt.src_ip || '—',
+        'Dest IP': pkt.dst_ip || '—',
+        'Source Port': pkt.src_port || '—',
+        'Dest Port': pkt.dst_port || '—',
+        Protocol: pkt.protocol,
+        Size: `${pkt.size} bytes`,
+        TTL: pkt.ttl || '—',
+        Flags: pkt.flags || '—',
+      })}
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">Firewall</div>
+      <div class="detail-row">
+        <span class="detail-label">Decision</span>
+        <span class="detail-value ${pkt.blocked ? 'red' : 'green'}">${pkt.blocked ? '⛔ DENIED' : '✓ ALLOWED'}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Rule ID</span>
+        <span class="detail-value amber">${pkt.fw_rule !== null ? '#'+pkt.fw_rule : 'default'}</span>
+      </div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">Layers</div>
+      <div class="detail-row">
+        <span class="detail-value cyan">${(pkt.layers || []).join(' → ')}</span>
+      </div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">Summary</div>
+      <div style="font-size:10px;color:var(--text-dim);word-break:break-all;line-height:1.6">${pkt.raw_summary || pkt.info || '—'}</div>
+    </div>
+    <div class="detail-section" style="margin-top:12px">
+      <button class="qb-btn" style="width:100%;margin-bottom:6px" onclick="blockIpFromDetail('${pkt.src_ip}')">⛔ Block Source IP</button>
+      <button class="qb-btn" style="width:100%" onclick="blockIpFromDetail('${pkt.dst_ip}')">⛔ Block Dest IP</button>
+    </div>
+  `;
+}
+
+async function blockIpFromDetail(ip) {
+  if (!ip || ip === 'null' || ip === '—') { toast('No IP to block', true); return; }
+  await quickBlock('/api/firewall/block-ip', { ip, direction: 'both' });
+}
+
+// ── Filter ────────────────────────────────────
+function debounceFilter(val) {
+  clearTimeout(filterDebounce);
+  filterDebounce = setTimeout(() => applyFilter(val), 400);
+}
+
+async function applyFilter(expr) {
+  filterExpression = expr.trim();
+  const inp = document.getElementById('filter-input');
+  if (!filterExpression) {
+    inp.className = '';
+    document.getElementById('filter-status').textContent = `${packets.length} shown`;
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/filter`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ expression: filterExpression })
+    });
+    const d = await r.json();
+    if (d.status === 'error') {
+      inp.className = 'error';
+      document.getElementById('filter-status').textContent = '✕ invalid';
+    } else {
+      inp.className = 'ok';
+      document.getElementById('filter-status').textContent = 'active';
+    }
+  } catch(e) {}
+}
+
+async function clearFilter() {
+  document.getElementById('filter-input').value = '';
+  document.getElementById('filter-input').className = '';
+  document.getElementById('filter-status').textContent = `${packets.length} shown`;
+  filterExpression = '';
+  await fetch(`${API}/api/filter/clear`, { method: 'POST' });
+  toast('Filter cleared');
+}
+
+// ── Firewall rules ────────────────────────────
+async function loadRules() {
+  try {
+    const r = await fetch(`${API}/api/firewall/rules`);
+    const d = await r.json();
+    renderRules(d.rules || []);
+  } catch(e) {}
+}
+
+function renderRules(rules) {
+  const el = document.getElementById('rules-list');
+  if (!rules.length) {
+    el.innerHTML = '<div style="color:var(--text-faint);font-size:10px;text-align:center;padding:20px">No rules defined</div>';
+    return;
+  }
+  el.innerHTML = rules.map(rule => `
+    <div class="rule-card ${rule.enabled ? '' : 'disabled'}" id="rule-${rule.id}">
+      <div class="rule-header">
+        <span class="rule-badge ${rule.action === 'DENY' ? 'badge-deny' : 'badge-allow'}">${rule.action}</span>
+        <span class="rule-name" title="${rule.description||''}">${rule.name}</span>
+        <div class="rule-actions">
+          <button class="icon-btn" onclick="toggleRule(${rule.id})" title="${rule.enabled?'Disable':'Enable'}">
+            ${rule.enabled ? '⊙' : '○'}
+          </button>
+          <button class="icon-btn del" onclick="deleteRule(${rule.id})" title="Delete">✕</button>
+        </div>
+      </div>
+      <div class="rule-body">
+        <span class="rule-tag">${rule.direction}</span>
+        <span class="rule-tag">${rule.protocol}</span>
+        ${rule.src_ip ? `<span class="rule-tag">src: ${rule.src_ip}</span>` : ''}
+        ${rule.dst_ip ? `<span class="rule-tag">dst: ${rule.dst_ip}</span>` : ''}
+        ${rule.src_port ? `<span class="rule-tag">sport: ${rule.src_port}</span>` : ''}
+        ${rule.dst_port ? `<span class="rule-tag">dport: ${rule.dst_port}</span>` : ''}
+        <span class="rule-tag" style="margin-left:auto;color:var(--text-faint)">hits: ${rule.hit_count}</span>
+        <span class="rule-tag" style="color:var(--text-faint)">p:${rule.priority}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function toggleRule(id) {
+  await fetch(`${API}/api/firewall/rules/${id}/toggle`, { method: 'POST' });
+  loadRules();
+}
+
+async function deleteRule(id) {
+  await fetch(`${API}/api/firewall/rules/${id}`, { method: 'DELETE' });
+  loadRules();
+  toast('Rule deleted');
+}
+
+function openRuleModal() {
+  document.getElementById('modal-overlay').classList.add('open');
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+async function submitRule() {
+  const rule = {
+    name: document.getElementById('r-name').value || 'Custom Rule',
+    action: document.getElementById('r-action').value,
+    direction: document.getElementById('r-direction').value,
+    protocol: document.getElementById('r-protocol').value,
+    priority: parseInt(document.getElementById('r-priority').value) || 100,
+    src_ip: document.getElementById('r-src-ip').value || null,
+    dst_ip: document.getElementById('r-dst-ip').value || null,
+    src_port: document.getElementById('r-src-port').value || null,
+    dst_port: document.getElementById('r-dst-port').value || null,
+    description: document.getElementById('r-desc').value || '',
+  };
+  try {
+    const r = await fetch(`${API}/api/firewall/rules`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(rule)
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    closeModal();
+    loadRules();
+    toast('Rule added');
+    ['r-name','r-src-ip','r-dst-ip','r-src-port','r-dst-port','r-desc'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+  } catch(e) { toast('Failed to add rule', true); }
+}
+
+async function quickBlockIP() {
+  const ip = document.getElementById('qb-ip').value.trim();
+  if (!ip) { toast('Enter an IP address', true); return; }
+  await quickBlock('/api/firewall/block-ip', { ip, direction: 'both' });
+  document.getElementById('qb-ip').value = '';
+}
+
+async function quickBlockPort() {
+  const port = document.getElementById('qb-port').value;
+  if (!port) { toast('Enter a port number', true); return; }
+  await quickBlock('/api/firewall/block-port', { port: parseInt(port), protocol: 'both' });
+  document.getElementById('qb-port').value = '';
+}
+
+async function quickBlock(endpoint, data) {
+  try {
+    const r = await fetch(`${API}${endpoint}`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(data)
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    loadRules();
+    toast(`Blocked: ${JSON.stringify(data)}`);
+  } catch(e) { toast('Block failed', true); }
+}
+
+// ── Stats ──────────────────────────────────────
+function startStatsPolling() {
+  stopStatsPolling();
+  statsInterval = setInterval(async () => {
+    if (activeRTab !== 'stats') return;
+    try {
+      const r = await fetch(`${API}/api/stats`);
+      const d = await r.json();
+      renderStats(d);
+    } catch(e) {}
+  }, 2000);
+}
+
+function stopStatsPolling() {
+  if (statsInterval) clearInterval(statsInterval);
+}
+
+async function loadStats() {
+  try {
+    const r = await fetch(`${API}/api/stats`);
+    const d = await r.json();
+    renderStats(d);
+  } catch(e) {}
+}
+
+function renderStats(stats) {
+  document.getElementById('s-total').textContent = stats.packet_count || 0;
+  document.getElementById('s-blocked').textContent = stats.blocked_count || 0;
+  document.getElementById('s-kbps').textContent = stats.avg_kbps || 0;
+  document.getElementById('s-mb').textContent = stats.total_mb || 0;
+
+  // Protocol distribution bars
+  const bars = document.getElementById('proto-bars');
+  const proto_colors = ['green','amber','blue','cyan','red'];
+  bars.innerHTML = (stats.proto_distribution || []).slice(0, 7).map((p, i) => `
+    <div class="proto-bar-row">
+      <div class="proto-bar-label">
+        <span>${p.protocol}</span>
+        <span style="color:var(--text-dim)">${p.count} (${p.pct}%)</span>
+      </div>
+      <div class="proto-bar-track">
+        <div class="proto-bar-fill ${proto_colors[i % proto_colors.length]}" style="width:${p.pct}%"></div>
+      </div>
+    </div>
+  `).join('');
+
+  // Bandwidth sparkline
+  bwHistory = stats.bw_history || bwHistory;
+  drawSparkline(bwHistory);
+
+  // Top src IPs
+  const srcTable = document.getElementById('top-src-table');
+  srcTable.innerHTML = (stats.top_src_ips || []).map((item,i) => `
+    <tr><td>${i+1}</td><td>${item.ip}</td><td>${item.mb} MB</td></tr>
+  `).join('');
+
+  // Top ports
+  const portTable = document.getElementById('top-port-table');
+  portTable.innerHTML = (stats.top_ports || []).map((item,i) => `
+    <tr><td>${i+1}</td><td>:${item.port}</td><td>${item.count}</td></tr>
+  `).join('');
+}
+
+function drawSparkline(history) {
+  const canvas = document.getElementById('bw-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth || 280;
+  const H = 60;
+  canvas.width = W; canvas.height = H;
+
+  ctx.clearRect(0,0,W,H);
+
+  if (!history || history.length < 2) {
+    ctx.fillStyle = '#2a4a34';
+    ctx.font = '10px JetBrains Mono';
+    ctx.fillText('No bandwidth data yet', 10, H/2+4);
+    return;
+  }
+
+  const values = history.map(b => b.bytes || 0);
+  const maxVal = Math.max(...values, 1);
+
+  // Grid lines
+  ctx.strokeStyle = '#1a2e24';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = H - (i/4) * H;
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+  }
+
+  // Area fill
+  const stepX = W / (history.length - 1);
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  history.forEach((b, i) => {
+    const x = i * stepX;
+    const y = H - (b.bytes / maxVal) * (H - 4);
+    if (i === 0) ctx.lineTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.lineTo(W, H);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0, 'rgba(0,255,136,0.4)');
+  grad.addColorStop(1, 'rgba(0,255,136,0.02)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.strokeStyle = '#00ff88';
+  ctx.lineWidth = 1.5;
+  history.forEach((b, i) => {
+    const x = i * stepX;
+    const y = H - (b.bytes / maxVal) * (H - 4);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Label
+  ctx.fillStyle = '#5a8a6a';
+  ctx.font = '9px JetBrains Mono';
+  ctx.fillText(`Max: ${(maxVal/1024).toFixed(1)} KB/s`, 6, 12);
+}
+
+// ── Blocked Log ───────────────────────────────
+async function loadBlockedLog() {
+  try {
+    const r = await fetch(`${API}/api/firewall/blocked-log?limit=100`);
+    const d = await r.json();
+    const el = document.getElementById('blocked-log-list');
+    if (!d.log || !d.log.length) {
+      el.innerHTML = '<div style="color:var(--text-faint);font-size:10px;text-align:center;padding:20px">No blocked packets logged</div>';
+      return;
+    }
+    el.innerHTML = d.log.map(entry => `
+      <div class="log-entry">
+        <span class="log-time">${(entry.timestamp||'').split('T')[1]?.split('.')[0] || '—'}</span>
+        <span class="log-detail">
+          ${entry.src_ip||'?'} → ${entry.dst_ip||'?'}
+          ${entry.dst_port ? ':'+entry.dst_port : ''}
+          [${entry.protocol||'?'}]
+          ${entry.rule_id ? '#'+entry.rule_id : ''}
+        </span>
+      </div>
+    `).join('');
+  } catch(e) {}
+}
+
+// ── Tab switching ─────────────────────────────
+function switchRTab(name, el) {
+  activeRTab = name;
+  document.querySelectorAll('.rtab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  ['detail','firewall','stats','blocked-log'].forEach(t => {
+    const tab = document.getElementById('tab-' + t);
+    if (tab) tab.style.display = t === name ? 'block' : 'none';
+  });
+  if (name === 'firewall') loadRules();
+  if (name === 'stats') { loadStats(); startStatsPolling(); }
+  if (name === 'blocked-log') loadBlockedLog();
+}
+
+// ── Helpers ───────────────────────────────────
+function setWsDot(connected) {
+  const dot = document.getElementById('ws-dot');
+  const lbl = document.getElementById('ws-label');
+  dot.classList.toggle('active', connected);
+  lbl.textContent = connected ? 'WS' : 'DISC';
+}
+
+function updateCounts() {
+  document.getElementById('disp-count').textContent = packets.length;
+  document.getElementById('buffer-count').textContent = packets.length;
+}
+
+function updateHeaderCounts() {
+  const blocked = packets.filter(p => p.blocked).length;
+  document.getElementById('blocked-count').textContent = blocked;
+  document.getElementById('total-count').textContent = packets.length;
+}
+
+let toastTimer;
+function toast(msg, isError = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show' + (isError ? ' error' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = '', 3000);
+}
+
+// ── Init ──────────────────────────────────────
+// Start stats polling for stats tab
+document.querySelector('.rtab[onclick*="stats"]').addEventListener('click', () => {
+  startStatsPolling();
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeModal(); clearFilter(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    document.getElementById('filter-input').focus();
+  }
+});
+
+// Periodically refresh rules hit counts
+setInterval(() => {
+  if (activeRTab === 'firewall') loadRules();
+}, 5000);
+</script>
+</body>
+</html>
