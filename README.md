@@ -9,7 +9,6 @@
   <img src="https://img.shields.io/badge/Capture-Scapy-orange?style=flat-square" />
   <img src="https://img.shields.io/badge/Enforcement-netsh%20%7C%20iptables-red?style=flat-square" />
   <img src="https://img.shields.io/badge/UI-Browser%20%28Flask%29-lightblue?style=flat-square" />
-  <img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" />
 </p>
 
 <p>
@@ -390,12 +389,6 @@ code NetGuard.code-workspace
 - [ ] Rate-based rules (block source if > N pps)
 - [ ] Alert notifications (desktop + webhook)
 - [ ] Standalone `.exe` via PyInstaller
-
----
-
-## 📄 License
-
-MIT — see [LICENSE](LICENSE)
 
 ---
 
