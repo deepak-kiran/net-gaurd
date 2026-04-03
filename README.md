@@ -76,12 +76,11 @@ Network Interface
 
 ```
 netguard/
-├── backend/
-│   ├── app.py                ← Flask app, REST API routes, Socket.IO events
-│   ├── packet_capture.py     ← Scapy sniffing engine, packet parser, PCAP export
-│   ├── firewall_engine.py    ← Rule management, netsh/iptables subprocess calls
-│   ├── filter_engine.py      ← Display filter expression compiler (pure Python re)
-│   └── stats_engine.py       ← Rolling bandwidth, protocol, and IP statistics
+├── app.py                ← Flask app, REST API routes, Socket.IO events
+├── packet_capture.py     ← Scapy sniffing engine, packet parser, PCAP export
+├── firewall_engine.py    ← Rule management, netsh/iptables subprocess calls
+├── filter_engine.py      ← Display filter expression compiler (pure Python re)
+│── stats_engine.py       ← Rolling bandwidth, protocol, and IP statistics
 ├── frontend/
 │   └── index.html            ← Single-file web UI — no build step required
 ├── exports/                  ← PCAP files saved here (auto-created)
